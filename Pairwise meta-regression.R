@@ -1,10 +1,3 @@
-library(dplyr)
-library(stringr)
-library(readxl)
-library(meta)
-
-raw_dat <- read_excel("C:/Users/10531/Downloads/distillersr-PCORI_Psoriasis_KQ1_and_KQ2_2026-06-19.xlsx")
-
 raw_dat <- raw_dat %>%
   rename(
     baseline_bsa_text = `What is baseline Body Surface Area (BSA)? Enter any information - sometimes this is a maximum, sometimes a mean, sometimes categories (i.e. mild, medium, or severe).`,
