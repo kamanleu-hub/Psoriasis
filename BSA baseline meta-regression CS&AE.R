@@ -1,0 +1,337 @@
+library(dplyr)
+library(stringr)
+library(readxl)
+library(meta)
+
+raw_dat <- read_excel("C:/Users/10531/Downloads/distillersr-PCORI_Psoriasis_KQ1_and_KQ2_2026-06-19.xlsx")
+
+raw_dat <- raw_dat %>%
+  rename(
+    baseline_bsa_text = `What is baseline Body Surface Area (BSA)? Enter any information - sometimes this is a maximum, sometimes a mean, sometimes categories (i.e. mild, medium, or severe).`,
+    patient_itch_mean_int_cont = `patient itch_mean_int_cont`,
+    patient_itch_n_int_categ = `patient itch_n_int_categ`
+  ) %>%
+  mutate(
+    asian_group = if_else(
+      `% Asian_comment` == 100,
+      "Asian Country",
+      "Western Country",
+      missing = "Western Country"
+    ),
+    asian_group = factor(asian_group, levels = c("Asian Country", "Western Country"))
+  ) %>%
+  mutate(
+    vehicle = coalesce(
+      `What "vehicle" or inactive carrier is used with the active ingredient? -> Cream`,
+      `What "vehicle" or inactive carrier is used with the active ingredient? -> Foam`
+    )
+  )
+
+prep_bsa_dat <- function(raw_dat) {
+  
+  extract_num <- function(x, pattern) {
+    as.numeric(str_match(x, regex(pattern, ignore_case = TRUE))[, 2])
+  }
+  
+  raw_dat %>%
+    select(
+      ID,
+      Refid,
+      intervention_description,
+      baseline_bsa_text,
+      Roflumilast,
+      Tapinarof,
+      control,
+      everything()
+    ) %>%
+    mutate(
+      concentration = str_extract(intervention_description, "\\b\\d+\\.?\\d*%"),
+      
+      bsa_int = extract_num(
+        baseline_bsa_text,
+        "intervention[^0-9]*([0-9]+\\.?[0-9]*)"
+      ),
+      bsa_int_sd = extract_num(
+        baseline_bsa_text,
+        "intervention[^0-9]*[0-9]+\\.?[0-9]*\\s*\\(([0-9]+\\.?[0-9]*)\\)"
+      ),
+      
+      bsa_ctrl = extract_num(
+        baseline_bsa_text,
+        "(?:vehicle|control|comparator)[^0-9]*([0-9]+\\.?[0-9]*)"
+      ),
+      bsa_ctrl_sd = extract_num(
+        baseline_bsa_text,
+        "(?:vehicle|control|comparator)[^0-9]*[0-9]+\\.?[0-9]*\\s*\\(([0-9]+\\.?[0-9]*)\\)"
+      ),
+      
+      overall_bsa = extract_num(
+        baseline_bsa_text,
+        "mean bsa[^0-9]*([0-9]+\\.?[0-9]*)"
+      ),
+      overall_bsa_sd = extract_num(
+        baseline_bsa_text,
+        "mean bsa[^0-9]*[0-9]+\\.?[0-9]*\\s*\\(([0-9]+\\.?[0-9]*)\\)"
+      ),
+      
+      bsa_int = coalesce(bsa_int, overall_bsa),
+      bsa_ctrl = coalesce(bsa_ctrl, overall_bsa),
+      bsa_int_sd = coalesce(bsa_int_sd, overall_bsa_sd),
+      bsa_ctrl_sd = coalesce(bsa_ctrl_sd, overall_bsa_sd)
+    ) %>%
+    select(-overall_bsa, -overall_bsa_sd)
+}
+sev_dat <- prep_bsa_dat(raw_dat)
+
+swap_comp_to_int <- function(dat, refid = 3434) {
+  
+  comp_cols <- names(dat)[grepl("_comp_", names(dat))]
+  
+  for (comp_col in comp_cols) {
+    
+    int_col <- sub("_comp_", "_int_", comp_col)
+    
+    if (int_col %in% names(dat)) {
+      
+      dat[[int_col]] <- ifelse(
+        dat$Refid == refid,
+        dat[[comp_col]],
+        dat[[int_col]]
+      )
+      
+    }
+  }
+  
+  dat
+}
+sev_dat <- swap_comp_to_int(sev_dat, refid = 3434)
+sev_dat <- sev_dat %>%
+  mutate(across(contains("_cont"), as.numeric))
+
+run_bsa_metareg <- function(dat,
+                            drug_col,
+                            event_e_col,
+                            n_e_col,
+                            event_c_col,
+                            n_c_col,
+                            bsa_cutoff = NULL,
+                            asian_subgroup = FALSE) {   
+  
+  dat2 <- dat %>%
+    filter(!is.na(.data[[drug_col]])) %>%
+    filter(
+      !is.na(.data[[event_e_col]]),
+      !is.na(.data[[n_e_col]]),
+      !is.na(.data[[event_c_col]]),
+      !is.na(.data[[n_c_col]])
+    ) %>%
+    mutate(
+      across(
+        all_of(c(event_e_col, n_e_col, event_c_col, n_c_col)),
+        as.numeric
+      ),
+      baseline_bsa = rowMeans(cbind(bsa_int, bsa_ctrl), na.rm = TRUE),
+      
+      subgroup_eth = if_else(
+        `% Asian_comment` == 100,
+        "East Asian Country",
+        "Western Country",
+        missing = "Western Country"
+      ),
+      subgroup_eth = factor(subgroup_eth, levels = c("East Asian Country", "Western Country"))
+    )%>%
+    mutate(
+      total_n = .data[[n_e_col]] + .data[[n_c_col]],
+      sample_size = sprintf(
+        "%d (%.1f)",
+        total_n,
+        100 * total_n / sum(total_n)
+      )
+    )
+  
+  dat2$baseline_bsa[is.nan(dat2$baseline_bsa)] <- NA_real_
+  
+  if (!is.null(bsa_cutoff)) {
+    dat2 <- dat2 %>%
+      filter(baseline_bsa > bsa_cutoff)
+  }
+  
+  m <- meta::metabin(
+    event.e = dat2[[event_e_col]],
+    n.e     = dat2[[n_e_col]],
+    event.c = dat2[[event_c_col]],
+    n.c     = dat2[[n_c_col]],
+    studlab = dat2$ID,
+    data    = dat2,
+    sm      = "RR",
+    random  = TRUE,
+    common  = FALSE,
+    method.random.ci = "HK",         
+    subgroup = if (asian_subgroup) dat2$subgroup_eth else NULL,
+    subgroup.name = ""
+  )
+  
+  mr <- meta::metareg(m, ~ baseline_bsa)
+  
+  list(
+    data = dat2,
+    meta = m,
+    metareg = mr
+  )
+}
+plot_metareg <- function(res){
+  
+  summary(res$meta)
+  
+  forest(
+    res$meta,
+    studlab = TRUE,
+    leftcols = c("studlab","vehicle","sample_size"),
+    leftlabs = c("Study","Vehicle","Sample size (%)"),
+    rightcols = c("effect","ci")
+  )
+  
+  print(coef(summary(res$metareg)))
+  
+  bubble(
+    res$metareg,
+    studlab = res$data$Refid,
+    xlab = "Mean baseline BSA (%)",
+    ylab = "Log RR"
+  )
+
+}
+#C.S. Roflumilast----
+res_R_cs <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Roflumilast",
+  event_e_col = "clinical_severity_counts_int_categ",
+  n_e_col     = "clinical_severity_n_int_categ",
+  event_c_col = "clinical_severity_counts_ctrl_categ",
+  n_c_col     = "clinical_severity_n_ctrl_categ"
+)
+plot_metareg(res_R_cs)
+
+#C.S. Tapinarof----
+res_T_cs <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Tapinarof",
+  event_e_col = "clinical_severity_counts_int_categ",
+  n_e_col     = "clinical_severity_n_int_categ",
+  event_c_col = "clinical_severity_counts_ctrl_categ",
+  n_c_col     = "clinical_severity_n_ctrl_categ",
+  asian_subgroup = TRUE
+)
+plot_metareg(res_T_cs)
+
+#A.E. Roflumilast----
+res_R_ae <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Roflumilast",
+  event_e_col = "nAEparticipants_counts_int_categ",
+  n_e_col     = "nAEparticipants_n_int_categ",
+  event_c_col = "nAEparticipants_counts_ctrl_categ",
+  n_c_col     = "nAEparticipants_n_ctrl_categ"
+)
+plot_metareg(res_R_ae)
+
+#A.E. Tapinarof----
+res_T_ae <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Tapinarof",
+  event_e_col = "nAEparticipants_counts_int_categ",
+  n_e_col     = "nAEparticipants_n_int_categ",
+  event_c_col = "nAEparticipants_counts_ctrl_categ",
+  n_c_col     = "nAEparticipants_n_ctrl_categ",
+  asian_subgroup = TRUE
+)
+plot_metareg(res_T_ae)
+
+
+#Itch Roflumilast  binary----
+res_R_itch <- run_bsa_metareg(
+  sev_dat,
+  drug_col   = "Roflumilast",
+  event_e_col = "patient_itch_counts_int_categ",
+  n_e_col     = "patient_itch_n_int_categ",
+  event_c_col = "patient_itch_counts_ctrl_categ",
+  n_c_col     = "patient_itch_n_ctrl_categ"
+)
+
+plot_metareg(res_R_itch)
+#Itch Tapinarof itch continuous----
+tap_itch <- sev_dat %>%
+  filter(!is.na(Tapinarof)) %>%
+  filter(
+    !is.na(patient_itch_mean_int_cont),
+    !is.na(patient_itch_SD_int_cont),
+    !is.na(patient_itch_n_int_cont),
+    !is.na(patient_itch_mean_ctrl_cont),
+    !is.na(patient_itch_SD_ctrl_cont),
+    !is.na(patient_itch_n_ctrl_cont)
+  ) %>%
+  mutate(
+    across(
+      c(
+        patient_itch_n_int_cont,
+        patient_itch_mean_int_cont,
+        patient_itch_SD_int_cont,
+        patient_itch_n_ctrl_cont,
+        patient_itch_mean_ctrl_cont,
+        patient_itch_SD_ctrl_cont
+      ),
+      as.numeric
+    ),
+    baseline_bsa = rowMeans(cbind(bsa_int, bsa_ctrl), na.rm = TRUE),
+    total_n = patient_itch_n_int_cont + patient_itch_n_ctrl_cont,
+    sample_size = sprintf(
+      "%d (%.1f)",
+      total_n,
+      100 * total_n / sum(total_n)
+    )
+  )
+
+tap_itch$baseline_bsa[is.nan(tap_itch$baseline_bsa)] <- NA_real_
+
+m_tap_itch <- metacont(
+  n.e = patient_itch_n_int_cont,
+  mean.e = patient_itch_mean_int_cont,
+  sd.e = patient_itch_SD_int_cont,
+  n.c = patient_itch_n_ctrl_cont,
+  mean.c = patient_itch_mean_ctrl_cont,
+  sd.c = patient_itch_SD_ctrl_cont,
+  studlab = ID,
+  data = tap_itch,
+  sm = "SMD",
+  random = TRUE,
+  common = FALSE,
+  method.random.ci = "HK",
+)
+
+summary(m_tap_itch)
+
+forest(
+  m_tap_itch,
+  leftcols = c("studlab", "vehicle", "sample_size"),
+  leftlabs = c("Study", "Vehicle", "Sample size(%)"),
+  rightcols = c("effect", "ci")
+)
+
+mr_tap_itch <- metareg(
+  m_tap_itch,
+  ~ baseline_bsa
+)
+
+summary(mr_tap_itch)
+#folliculitis Tapinarof----
+res_T_f <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Tapinarof",
+  event_e_col = "folliculitis_counts_int_categ",
+  n_e_col     = "folliculitis_n_int_categ",
+  event_c_col = "folliculitis_counts_ctrl_categ",
+  n_c_col     = "folliculitis_n_ctrl_categ",
+  asian_subgroup = TRUE
+)
+
+plot_metareg(res_T_f)
