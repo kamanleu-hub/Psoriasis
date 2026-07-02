@@ -1,17 +1,3 @@
-library(dplyr)
-library(readr)
-library(stringr)
-library(metafor)
-library(netmeta)
-library(tidyr)
-library(ggplot2)
-raw_dat <- read_csv("C:/Users/10531/Downloads/distillersr-PCORI_Psoriasis KQ1 +2_2026-05-10 (1).csv")
-
-col_df <- data.frame(
-  column_number = seq_along(names(raw_dat)),
-  column_name = names(raw_dat)
-)
-
 raw_dat <- raw_dat %>%
   rename(
     baseline_bsa_text = `What is baseline Body Surface Area (BSA)? Enter any information - sometimes this is a maximum, sometimes a mean, sometimes categories (i.e. mild, medium, or severe).`
