@@ -8,3 +8,4 @@
 
 [ClinicalSeverity_NMA.R](./ClinicalSeverity_NMA.R)
 ## Pairwise Meta-Analysis Script
+`Pairwise meta-regression.R`
