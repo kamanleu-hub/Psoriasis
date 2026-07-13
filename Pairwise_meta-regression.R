@@ -123,7 +123,8 @@ run_bsa_metareg <- function(dat,
         all_of(c(event_e_col, n_e_col, event_c_col, n_c_col)),
         as.numeric
       ),
-      baseline_bsa = rowMeans(cbind(bsa_int, bsa_ctrl), na.rm = TRUE),
+      baseline_bsa = (bsa_int * .data[[n_e_col]] + bsa_ctrl * .data[[n_c_col]]) /
+        (.data[[n_e_col]] + .data[[n_c_col]]),
       
       subgroup_eth = if_else(
         `% Asian_comment` == 100,
