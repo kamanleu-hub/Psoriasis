@@ -185,18 +185,26 @@ run_bsa_metareg <- function(dat,
     metareg = mr
   )
 }
-plot_metareg <- function(res){
+plot_metareg <- function(res, vehicle_subgroup = FALSE) {
   
-  summary(res$meta)
+  if (vehicle_subgroup) {
+    leftcols <- c("studlab", "sample_size")
+    leftlabs <- c("Study", "Sample size (%)")
+  } else {
+    leftcols <- c("studlab", "vehicle", "sample_size")
+    leftlabs <- c("Study", "Vehicle", "Sample size (%)")
+  }
   
   forest(
     res$meta,
     studlab = TRUE,
-    leftcols = c("studlab","vehicle","sample_size"),
-    leftlabs = c("Study","Vehicle","Sample size (%)"),
-    rightcols = c("effect","ci")
+    leftcols = leftcols,
+    leftlabs = leftlabs,
+    rightcols = c("effect", "ci"),
+    print.subgroup.name = FALSE
   )
   
+  summary(res$meta)
   print(coef(summary(res$metareg)))
   
   bubble(
@@ -205,8 +213,8 @@ plot_metareg <- function(res){
     xlab = "Mean baseline BSA (%)",
     ylab = "Log RR"
   )
-
 }
+
 #C.S. Roflumilast----
 res_R_cs <- run_bsa_metareg(
   sev_dat,
@@ -214,9 +222,11 @@ res_R_cs <- run_bsa_metareg(
   event_e_col = "clinical_severity_counts_int_categ",
   n_e_col     = "clinical_severity_n_int_categ",
   event_c_col = "clinical_severity_counts_ctrl_categ",
-  n_c_col     = "clinical_severity_n_ctrl_categ"
+  n_c_col     = "clinical_severity_n_ctrl_categ",
+  vehicle_subgroup = TRUE
 )
-plot_metareg(res_R_cs)
+
+plot_metareg(res_R_cs,vehicle_subgroup = TRUE)
 
 #C.S. Tapinarof----
 res_T_cs <- run_bsa_metareg(
@@ -229,7 +239,7 @@ res_T_cs <- run_bsa_metareg(
   asian_subgroup = TRUE
 )
 plot_metareg(res_T_cs)
-
+summary(res_T_cs$meta)
 #A.E. Roflumilast----
 res_R_ae <- run_bsa_metareg(
   sev_dat,
@@ -237,10 +247,11 @@ res_R_ae <- run_bsa_metareg(
   event_e_col = "nAEparticipants_counts_int_categ",
   n_e_col     = "nAEparticipants_n_int_categ",
   event_c_col = "nAEparticipants_counts_ctrl_categ",
-  n_c_col     = "nAEparticipants_n_ctrl_categ"
+  n_c_col     = "nAEparticipants_n_ctrl_categ",
+  vehicle_subgroup = TRUE
 )
-plot_metareg(res_R_ae)
-
+plot_metareg(res_R_ae,vehicle_subgroup = TRUE)
+summary(res_R_ae$meta)
 #A.E. Tapinarof----
 res_T_ae <- run_bsa_metareg(
   sev_dat,
@@ -261,10 +272,11 @@ res_R_itch <- run_bsa_metareg(
   event_e_col = "patient_itch_counts_int_categ",
   n_e_col     = "patient_itch_n_int_categ",
   event_c_col = "patient_itch_counts_ctrl_categ",
-  n_c_col     = "patient_itch_n_ctrl_categ"
+  n_c_col     = "patient_itch_n_ctrl_categ",
+  vehicle_subgroup = TRUE
 )
 
-plot_metareg(res_R_itch)
+plot_metareg(res_R_itch,  vehicle_subgroup = TRUE)
 #Itch Tapinarof itch continuous----
 tap_itch <- sev_dat %>%
   filter(!is.na(Tapinarof)) %>%
@@ -288,7 +300,12 @@ tap_itch <- sev_dat %>%
       ),
       as.numeric
     ),
-    baseline_bsa = rowMeans(cbind(bsa_int, bsa_ctrl), na.rm = TRUE),
+    baseline_bsa = (
+      bsa_int * patient_itch_n_int_cont +
+        bsa_ctrl * patient_itch_n_ctrl_cont
+    ) / (
+      patient_itch_n_int_cont + patient_itch_n_ctrl_cont
+    ),
     total_n = patient_itch_n_int_cont + patient_itch_n_ctrl_cont,
     sample_size = sprintf(
       "%d (%.1f)",
@@ -329,6 +346,12 @@ mr_tap_itch <- metareg(
 )
 
 summary(mr_tap_itch)
+bubble(
+  mr_tap_itch,
+  studlab = mr_tap_itch$data$Refid,
+  xlab = "Mean baseline BSA (%)",
+  ylab = "Log RR"
+)
 #folliculitis Tapinarof----
 res_T_f <- run_bsa_metareg(
   sev_dat,
@@ -341,3 +364,88 @@ res_T_f <- run_bsa_metareg(
 )
 
 plot_metareg(res_T_f)
+
+
+
+#PSD Roflumilast----
+rof_symptoms <- sev_dat %>%
+  filter(!is.na(Roflumilast)) %>%
+  filter(
+    !is.na(patient_symptoms_n_int_cont),
+    !is.na(patient_symptoms_mean_int_cont),
+    !is.na(patient_symptoms_SD_int_cont),
+    !is.na(patient_symptoms_n_ctrl_cont),
+    !is.na(patient_symptoms_mean_ctrl_cont),
+    !is.na(patient_symptoms_SD_ctrl_cont)
+  ) %>%
+  mutate(
+    across(
+      c(
+        patient_symptoms_n_int_cont,
+        patient_symptoms_mean_int_cont,
+        patient_symptoms_SD_int_cont,
+        patient_symptoms_n_ctrl_cont,
+        patient_symptoms_mean_ctrl_cont,
+        patient_symptoms_SD_ctrl_cont
+      ),
+      as.numeric
+    ),
+    baseline_bsa = (
+      bsa_int * patient_symptoms_n_int_cont +
+        bsa_ctrl * patient_symptoms_n_ctrl_cont
+    ) / (
+      patient_symptoms_n_int_cont + patient_symptoms_n_ctrl_cont
+    ),
+    subgroup_vehicle = factor(
+      vehicle,
+      levels = c("Foam", "Cream")
+    ),
+    total_n = patient_symptoms_n_int_cont + patient_symptoms_n_ctrl_cont,
+    sample_size = sprintf(
+      "%d (%.1f)",
+      total_n,
+      100 * total_n / sum(total_n)
+    )
+  )
+
+rof_symptoms$baseline_bsa[is.nan(rof_symptoms$baseline_bsa)] <- NA_real_
+
+m_rof_symptoms <- metacont(
+  n.e = patient_symptoms_n_int_cont,
+  mean.e = patient_symptoms_mean_int_cont,
+  sd.e = patient_symptoms_SD_int_cont,
+  n.c = patient_symptoms_n_ctrl_cont,
+  mean.c = patient_symptoms_mean_ctrl_cont,
+  sd.c = patient_symptoms_SD_ctrl_cont,
+  studlab = ID,
+  data = rof_symptoms,
+  sm = "SMD",
+  random = TRUE,
+  common = FALSE,
+  method.random.ci = "HK",
+  subgroup = subgroup_vehicle,
+)
+
+summary(m_rof_symptoms)
+
+forest(
+  m_rof_symptoms,
+  leftcols = c("studlab", "sample_size"),
+  leftlabs = c("Study", "Sample size (%)"),
+  rightcols = c("effect", "ci"),
+  print.subgroup.name = FALSE
+)
+
+mr_rof_symptoms <- metareg(
+  m_rof_symptoms,
+  ~ baseline_bsa
+)
+
+summary(mr_rof_symptoms)
+
+bubble(
+  mr_rof_symptoms,
+  studlab = mr_rof_symptoms$data$Refid,
+  xlab = "Mean baseline BSA (%)",
+  ylab = "SMD"
+)
