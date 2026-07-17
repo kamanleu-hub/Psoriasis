@@ -107,9 +107,8 @@ run_bsa_metareg <- function(dat,
                             n_e_col,
                             event_c_col,
                             n_c_col,
-                            bsa_cutoff = NULL,
-                            asian_subgroup = FALSE) {   
-  
+                            asian_subgroup = FALSE,
+                            vehicle_subgroup = FALSE) {
   dat2 <- dat %>%
     filter(!is.na(.data[[drug_col]])) %>%
     filter(
@@ -123,19 +122,29 @@ run_bsa_metareg <- function(dat,
         all_of(c(event_e_col, n_e_col, event_c_col, n_c_col)),
         as.numeric
       ),
-      baseline_bsa = (bsa_int * .data[[n_e_col]] + bsa_ctrl * .data[[n_c_col]]) /
+      
+      baseline_bsa =
+        (bsa_int * .data[[n_e_col]] +
+           bsa_ctrl * .data[[n_c_col]]) /
         (.data[[n_e_col]] + .data[[n_c_col]]),
       
-      subgroup_eth = if_else(
-        `% Asian_comment` == 100,
-        "East Asian Country",
-        "Western Country",
-        missing = "Western Country"
+      subgroup_eth = factor(
+        if_else(
+          `% Asian_comment` == 100,
+          "East Asian Country",
+          "Western Country",
+          missing = "Western Country"
+        ),
+        levels = c("East Asian Country", "Western Country")
       ),
-      subgroup_eth = factor(subgroup_eth, levels = c("East Asian Country", "Western Country"))
-    )%>%
-    mutate(
+      
+      subgroup_vehicle = factor(
+        vehicle,
+        levels = c("Foam", "Cream")
+      ),
+      
       total_n = .data[[n_e_col]] + .data[[n_c_col]],
+      
       sample_size = sprintf(
         "%d (%.1f)",
         total_n,
@@ -145,9 +154,13 @@ run_bsa_metareg <- function(dat,
   
   dat2$baseline_bsa[is.nan(dat2$baseline_bsa)] <- NA_real_
   
-  if (!is.null(bsa_cutoff)) {
-    dat2 <- dat2 %>%
-      filter(baseline_bsa > bsa_cutoff)
+  subgroup_var <- NULL
+  subgroup_name <- ""
+  
+  if (asian_subgroup) {
+    subgroup_var <- dat2$subgroup_eth
+  } else if (vehicle_subgroup) {
+    subgroup_var <- dat2$subgroup_vehicle
   }
   
   m <- meta::metabin(
@@ -160,9 +173,8 @@ run_bsa_metareg <- function(dat,
     sm      = "RR",
     random  = TRUE,
     common  = FALSE,
-    method.random.ci = "HK",         
-    subgroup = if (asian_subgroup) dat2$subgroup_eth else NULL,
-    subgroup.name = ""
+    method.random.ci = "HK",
+    subgroup = subgroup_var
   )
   
   mr <- meta::metareg(m, ~ baseline_bsa)
