@@ -163,7 +163,7 @@ run_bsa_metareg <- function(dat,
     subgroup_var <- dat2$subgroup_vehicle
   }
   
-  m <- meta::metabin(
+  meta_sub <- meta::metabin(
     event.e = dat2[[event_e_col]],
     n.e     = dat2[[n_e_col]],
     event.c = dat2[[event_c_col]],
@@ -174,14 +174,29 @@ run_bsa_metareg <- function(dat,
     random  = TRUE,
     common  = FALSE,
     method.random.ci = "HK",
-    subgroup = subgroup_var
+    subgroup = subgroup_var,
+    subgroup.name = subgroup_name
   )
   
-  mr <- meta::metareg(m, ~ baseline_bsa)
+  meta_nosub <- meta::metabin(
+    event.e = dat2[[event_e_col]],
+    n.e     = dat2[[n_e_col]],
+    event.c = dat2[[event_c_col]],
+    n.c     = dat2[[n_c_col]],
+    studlab = dat2$ID,
+    data    = dat2,
+    sm      = "RR",
+    random  = TRUE,
+    common  = FALSE,
+    method.random.ci = "HK"
+  )
+  
+  mr <- meta::metareg(meta_sub, ~ baseline_bsa)
   
   list(
     data = dat2,
-    meta = m,
+    meta = meta_sub,
+    meta_nosub = meta_nosub,
     metareg = mr
   )
 }
@@ -328,7 +343,7 @@ m_tap_itch <- metacont(
   sm = "SMD",
   random = TRUE,
   common = FALSE,
-  method.random.ci = "HK",
+  method.random.ci = "HK"
 )
 
 summary(m_tap_itch)
@@ -336,7 +351,7 @@ summary(m_tap_itch)
 forest(
   m_tap_itch,
   leftcols = c("studlab", "vehicle", "sample_size"),
-  leftlabs = c("Study", "Vehicle", "Sample size(%)"),
+  leftlabs = c("Study", "Vehicle", "Sample size (%)"),
   rightcols = c("effect", "ci")
 )
 
@@ -346,11 +361,12 @@ mr_tap_itch <- metareg(
 )
 
 summary(mr_tap_itch)
+
 bubble(
   mr_tap_itch,
   studlab = mr_tap_itch$data$Refid,
   xlab = "Mean baseline BSA (%)",
-  ylab = "Log RR"
+  ylab = "SMD"
 )
 #folliculitis Tapinarof----
 res_T_f <- run_bsa_metareg(
@@ -423,7 +439,22 @@ m_rof_symptoms <- metacont(
   random = TRUE,
   common = FALSE,
   method.random.ci = "HK",
-  subgroup = subgroup_vehicle,
+  subgroup = subgroup_vehicle
+)
+
+m_rof_symptoms_nosub <- metacont(
+  n.e = patient_symptoms_n_int_cont,
+  mean.e = patient_symptoms_mean_int_cont,
+  sd.e = patient_symptoms_SD_int_cont,
+  n.c = patient_symptoms_n_ctrl_cont,
+  mean.c = patient_symptoms_mean_ctrl_cont,
+  sd.c = patient_symptoms_SD_ctrl_cont,
+  studlab = ID,
+  data = rof_symptoms,
+  sm = "SMD",
+  random = TRUE,
+  common = FALSE,
+  method.random.ci = "HK"
 )
 
 summary(m_rof_symptoms)
@@ -449,3 +480,30 @@ bubble(
   xlab = "Mean baseline BSA (%)",
   ylab = "SMD"
 )
+#Bias test----
+run_bias_tests <- function(x, outcome_name, k_min = 3) {
+  stopifnot(inherits(x, "meta"))
+  
+  cat("\n==============================\n")
+  cat(outcome_name, "\n")
+  cat("==============================\n\n")
+  
+  cat("Begg's test:\n")
+  print(meta::metabias(x, method.bias = "Begg", k.min = k_min))
+  
+  cat("\nEgger's test:\n")
+  print(meta::metabias(x, method.bias = "Egger", k.min = k_min))
+}
+
+run_bias_tests(res_R_cs$meta_nosub, "Clinical Severity - Roflumilast")
+run_bias_tests(res_T_cs$meta_nosub, "Clinical Severity - Tapinarof")
+
+run_bias_tests(res_R_ae$meta_nosub, "Adverse Events - Roflumilast")
+run_bias_tests(res_T_ae$meta_nosub, "Adverse Events - Tapinarof")
+
+run_bias_tests(res_R_itch$meta_nosub, "Itch - Roflumilast")
+run_bias_tests(m_tap_itch, "Itch - Tapinarof")
+
+run_bias_tests(res_T_f$meta_nosub, "Folliculitis - Tapinarof")
+
+run_bias_tests(m_rof_symptoms_nosub, "Patient Diary Symptoms - Roflumilast")
