@@ -1,6 +1,6 @@
 raw_dat <- raw_dat %>%
   rename(
-    baseline_bsa_text = `What is baseline Body Surface Area (BSA)? Enter any information - sometimes this is a maximum, sometimes a mean, sometimes categories (i.e. mild, medium, or severe).`,
+    baseline_bsa_text = `BSA...71`,
     patient_itch_mean_int_cont = `patient itch_mean_int_cont`,
     patient_itch_n_int_categ = `patient itch_n_int_categ`
   ) %>%
@@ -11,14 +11,16 @@ raw_dat <- raw_dat %>%
       "Western Country",
       missing = "Western Country"
     ),
-    asian_group = factor(asian_group, levels = c("Asian Country", "Western Country"))
-  ) %>%
-  mutate(
+    asian_group = factor(
+      asian_group,
+      levels = c("Asian Country", "Western Country")
+    ),
     vehicle = coalesce(
-      `What "vehicle" or inactive carrier is used with the active ingredient? -> Cream`,
-      `What "vehicle" or inactive carrier is used with the active ingredient? -> Foam`
+      `Vehicle -> Cream`,
+      `Vehicle -> Foam`
     )
   )
+
 
 prep_bsa_dat <- function(raw_dat) {
   
@@ -200,7 +202,7 @@ run_bsa_metareg <- function(dat,
     metareg = mr
   )
 }
-plot_metareg <- function(res, vehicle_subgroup = FALSE) {
+plot_metareg <- function(res, drug_label, vehicle_subgroup = FALSE) {
   
   if (vehicle_subgroup) {
     leftcols <- c("studlab", "sample_size")
@@ -210,17 +212,27 @@ plot_metareg <- function(res, vehicle_subgroup = FALSE) {
     leftlabs <- c("Study", "Vehicle", "Sample size (%)")
   }
   
+  overall_label <- if (vehicle_subgroup) {
+    "Overall random-effects model (foam and cream combined)"
+  } else {
+    "Overall random-effects model"
+  }
+  
   forest(
     res$meta,
     studlab = TRUE,
     leftcols = leftcols,
     leftlabs = leftlabs,
     rightcols = c("effect", "ci"),
-    print.subgroup.name = FALSE
+    print.subgroup.name = FALSE,
+    label.left = "Favors vehicle",
+    label.right = paste("Favors", drug_label),
+    text.random = overall_label,
+    text.random.w = "Random-effects model"
   )
   
-  summary(res$meta)
-  print(coef(summary(res$metareg)))
+  print(summary(res$meta))
+  print(summary(res$metareg))
   
   bubble(
     res$metareg,
@@ -229,7 +241,7 @@ plot_metareg <- function(res, vehicle_subgroup = FALSE) {
     ylab = "Log RR"
   )
 }
-
+graphics.off()
 #C.S. Roflumilast----
 res_R_cs <- run_bsa_metareg(
   sev_dat,
@@ -241,7 +253,11 @@ res_R_cs <- run_bsa_metareg(
   vehicle_subgroup = TRUE
 )
 
-plot_metareg(res_R_cs,vehicle_subgroup = TRUE)
+plot_metareg(
+  res_R_cs,
+  drug_label = "Roflumilast",
+  vehicle_subgroup = TRUE
+)
 
 #C.S. Tapinarof----
 res_T_cs <- run_bsa_metareg(
@@ -253,8 +269,8 @@ res_T_cs <- run_bsa_metareg(
   n_c_col     = "clinical_severity_n_ctrl_categ",
   asian_subgroup = TRUE
 )
-plot_metareg(res_T_cs)
-summary(res_T_cs$meta)
+plot_metareg(res_T_cs,  drug_label = "Tapinarof")
+
 #A.E. Roflumilast----
 res_R_ae <- run_bsa_metareg(
   sev_dat,
@@ -265,8 +281,8 @@ res_R_ae <- run_bsa_metareg(
   n_c_col     = "nAEparticipants_n_ctrl_categ",
   vehicle_subgroup = TRUE
 )
-plot_metareg(res_R_ae,vehicle_subgroup = TRUE)
-summary(res_R_ae$meta)
+plot_metareg(res_R_ae, drug_label = "Roflumilast", vehicle_subgroup = TRUE)
+
 #A.E. Tapinarof----
 res_T_ae <- run_bsa_metareg(
   sev_dat,
@@ -291,7 +307,7 @@ res_R_itch <- run_bsa_metareg(
   vehicle_subgroup = TRUE
 )
 
-plot_metareg(res_R_itch,  vehicle_subgroup = TRUE)
+plot_metareg(res_R_itch,   drug_label = "Roflumilast", vehicle_subgroup = TRUE)
 #Itch Tapinarof itch continuous----
 tap_itch <- sev_dat %>%
   filter(!is.na(Tapinarof)) %>%
@@ -464,7 +480,11 @@ forest(
   leftcols = c("studlab", "sample_size"),
   leftlabs = c("Study", "Sample size (%)"),
   rightcols = c("effect", "ci"),
-  print.subgroup.name = FALSE
+  print.subgroup.name = FALSE,
+  label.left  = "Favors Roflumilast",
+  label.right = "Favors vehicle",
+  text.random = "Overall random-effects model (foam and cream combined)",
+  text.random.w = "Random-effects model"
 )
 
 mr_rof_symptoms <- metareg(
@@ -480,6 +500,31 @@ bubble(
   xlab = "Mean baseline BSA (%)",
   ylab = "SMD"
 )
+#GI Roflumilast ----
+res_R_gi <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Roflumilast",
+  event_e_col = "GI_counts_int_categ",
+  n_e_col     = "GI_n_int_categ",
+  event_c_col = "GI_counts_ctrl_categ",
+  n_c_col     = "GI_n_ctrl_categ",
+  vehicle_subgroup = TRUE
+)
+
+plot_metareg(res_R_gi, drug_label = "Roflumilast", vehicle_subgroup = TRUE)
+#Irritation Tapinarof ----
+res_T_irritation <- run_bsa_metareg(
+  sev_dat,
+  drug_col    = "Tapinarof",
+  event_e_col = "irritation_counts_int_categ",
+  n_e_col     = "irritation_n_int_categ",
+  event_c_col = "irritation_counts_ctrl_categ",
+  n_c_col     = "irritation_n_ctrl_categ",
+  asian_subgroup = TRUE
+)
+
+plot_metareg(res_T_irritation,drug_label = "Tapinarof")
+
 #Bias test----
 run_bias_tests <- function(x, outcome_name, k_min = 3) {
   stopifnot(inherits(x, "meta"))
@@ -507,3 +552,4 @@ run_bias_tests(m_tap_itch, "Itch - Tapinarof")
 run_bias_tests(res_T_f$meta_nosub, "Folliculitis - Tapinarof")
 
 run_bias_tests(m_rof_symptoms_nosub, "Patient Diary Symptoms - Roflumilast")
+
