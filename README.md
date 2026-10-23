@@ -1,5 +1,6 @@
 # Psoriasis Meta-analysis
 ## Required R packages
+- netmeta
 - meta
 - dplyr
 - stringr
